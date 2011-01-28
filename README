@@ -1,5 +1,7 @@
 This is a command line front end to NuGet, using Mono.Options.
 
-Simple, with no overengineering bits in place
+Simple, with no overengineering bits in place, it also provides
+an interactive shell, so the user is not punished for using the
+list command.
 
 Apache2 licensed
