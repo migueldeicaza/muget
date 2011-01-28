@@ -1,5 +1,5 @@
-muget.exe: muget.cs
-	dmcs -debug muget.cs Options.cs -r:NuGet.Core.dll
+muget.exe: muget.cs getline.cs Options.cs
+	dmcs -debug muget.cs getline.cs Options.cs -r:NuGet.Core.dll
 
 list: muget.exe
 	mono --debug muget.exe list

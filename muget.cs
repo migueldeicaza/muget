@@ -3,6 +3,8 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Linq;
+using System.Threading.Tasks;
+using System.Threading;
 using NuGet;
 using Mono.Options;
 
@@ -23,7 +25,32 @@ class MuGet {
 			return repoFactory;
 		}
 	}
-	
+
+	IPackage [] packages;
+	public IPackage [] Packages {
+		get {
+			var wait = new ManualResetEvent (false);
+			Task.Factory.StartNew (delegate {
+				if (packages == null)
+					packages = PackageRepository.GetPackages ().ToArray ();
+				wait.Set ();
+			});
+			while (!wait.WaitOne (TimeSpan.FromSeconds (1)))
+				Spin ("Loading ");
+			Console.WriteLine ();
+			
+			return packages;
+		}
+	}
+
+	static char [] spinner = new char [] { '|', '/', '-', '\\' };
+	static int spinnerIdx;
+	public void Spin (string prefix)
+	{
+		Console.Write ("{0}{1}\r", prefix, spinner [spinnerIdx]);
+		spinnerIdx = (spinnerIdx+1)%spinner.Length;
+	}
+
 	public int InstallCommand ()
 	{
 		if (Arguments.Count < 1){
@@ -43,12 +70,15 @@ class MuGet {
 	
 	public int ListCommand ()
 	{
-		var packages = PackageRepository.GetPackages ();
-		if (Arguments.Count != 0)
-			packages = packages.Find (Arguments.ToArray ());
+		var packages = Packages;
+		string terms = Arguments.Count != 0 ? Arguments [0].ToLower () : null;
 		bool hasPackages = false;
 		
 		foreach (var package in packages){
+			if (terms != null)
+				if (package.Id.ToLower ().IndexOf (terms) == -1)
+					continue;
+			
 			hasPackages = true;
 			if (Verbose)
 				Console.WriteLine ("{0}\n  Version: {1}\n  {2}", package.Id, package.Version, Fmt ("  ", "Description: " + package.Description));
@@ -60,7 +90,7 @@ class MuGet {
 		return 0;
 	}
 	
-	public void ShowHelp ()
+	public void ShowHelp (bool interactive)
 	{
 		Console.WriteLine ("Usage is: muget command [OPTIONS]");
 		Console.WriteLine ("Commands:");
@@ -70,8 +100,8 @@ class MuGet {
 		Console.WriteLine ("Options:");
 		options.WriteOptionDescriptions (Console.Out);
 	}
-	
-	public int Run (string [] args)
+
+	public MuGet ()
 	{
 		options = new OptionSet () {
 			{ "verbose", "Operate in verbose mode", f => Verbose = true },
@@ -79,21 +109,39 @@ class MuGet {
 			{ "h|help", "Show this help", f => showHelp = true },
 			{ "s|source", "Sets the source repository url", f => SourceUrl = f }
 		};
+	}
+
+	public void Interactive ()
+	{
+		var lineEditor = new Mono.Terminal.LineEditor ("muget");
+		string s;
+
+		while ((s = lineEditor.Edit ("muget> ", "")) != null){
+			Run (s.Split (' '), true);
+		}
+	}
+	
+	public int Run (string [] args, bool interactive)
+	{
 		try {
 			Arguments = options.Parse (args);
 		} catch (OptionException e){
-			Console.WriteLine ("Error: {0}\nTry using --help", e.Message);
+			if (interactive)
+				Console.WriteLine ("Parsing error: {0}", e.Message);
+			else
+				Console.WriteLine ("Error: {0}\nTry using --help", e.Message);
 			return 1;
 		}
 		if (showHelp){
-			ShowHelp ();
+			ShowHelp (interactive);
 			return 0;
 		}
 
 		if (Arguments.Count == 0){
-			ShowHelp ();
+			Interactive ();
 			return 0;
 		}
+		
 		string command = Arguments [0].ToLower ();
 		Arguments = Arguments.Skip (1).ToList ();
 		switch (command){
@@ -105,21 +153,38 @@ class MuGet {
 			return ListCommand ();
 			
 		case "pack":
+			return PackCommand ();
+			
 		case "publish": case "pub":
 		case "update": case "up":
+
 		default:
 			Console.Error.WriteLine ("muget: unknown command {0}", command);
-			ShowHelp ();
+			ShowHelp (interactive);
 			return 1;
 		}
 
-		return 1;
+		if (!interactive)
+			return 1;
+
+		// Interactive commands
+		switch (command){
+		case "quit":
+			if (interactive)
+				Environment.Exit (0);
+			break;
+
+		case "help":
+			ShowHelp ();
+			break;
+			
+		}
 	}
 	
 	public static int Main (string [] args)
 	{
 		var muget = new MuGet ();
-		return muget.Run (args);
+		return muget.Run (args, false);
 	}
 
 	int WindowWidth ()
